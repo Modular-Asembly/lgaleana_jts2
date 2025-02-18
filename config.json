@@ -1,0 +1,18 @@
+{
+  "name": "jts2",
+  "user": "lgaleana",
+  "architecture": [
+    {
+      "design": {
+        "type": "infrastructure",
+        "name": "CloudRun",
+        "namespace": "External",
+        "config": {}
+      },
+      "files": [],
+      "update_status": "up_to_date",
+      "is_deployed": false
+    }
+  ],
+  "github": "https://github.com/Modular-Asembly/lgaleana_jts2"
+}
