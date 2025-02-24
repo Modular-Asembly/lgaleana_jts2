@@ -8,22 +8,24 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.database.sql_adaptor import Base, engine
 from app.pipeline.pipeline_endpoint import router as pipeline_router
+from typing import Any
 
 def create_app() -> FastAPI:
     """
     Creates and configures the FastAPI application.
-
-    1. Initializes the FastAPI app.
-    2. Configures CORSMiddleware to allow all origins.
-    3. Includes all application routers.
-    4. Calls Base.metadata.create_all(engine) to create database tables.
-
+    
+    Steps:
+      1. Initializes the FastAPI app.
+      2. Configures CORSMiddleware to allow all origins, credentials, methods, and headers.
+      3. Includes the application routers.
+      4. Calls Base.metadata.create_all(engine) to create all database tables.
+    
     Returns:
         A configured FastAPI application instance.
     """
-    app = FastAPI()
+    app: FastAPI = FastAPI()
 
-    # Configure CORS middleware to allow any origin, credentials, methods, and headers
+    # Configure CORS middleware with all origins allowed
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -40,4 +42,5 @@ def create_app() -> FastAPI:
 
     return app
 
-app = create_app()
+# Create the FastAPI application instance to be imported elsewhere
+app: FastAPI = create_app()
