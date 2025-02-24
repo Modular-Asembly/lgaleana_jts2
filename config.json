@@ -19,8 +19,8 @@
         "name": "main",
         "namespace": "app",
         "dependencies": [
-          "app.core.database.sql_adaptor",
-          "app.pipeline.pipeline_endpoint"
+          "app.pipeline.pipeline_endpoint",
+          "app.core.database.sql_adaptor"
         ],
         "purpose": "1) Calls load_dotenv() before any other import.\n2) Initializes the FastAPI app.\n3) Adds CORSMiddleware with *.\n4) Adds all the application routers.\n5) Calls Base.metadata.create_all(engine).",
         "pypi_packages": [
@@ -34,10 +34,10 @@
       "files": [
         {
           "path": "app/main.py",
-          "content": "from fastapi import FastAPI\nfrom fastapi.middleware.cors import CORSMiddleware\nfrom dotenv import load_dotenv\n\nfrom app.core.database.sql_adaptor import Base, engine\nfrom app.pipeline.pipeline_endpoint import router as pipeline_router\n\ndef create_app() -> FastAPI:\n    \"\"\"\n    Creates and configures the FastAPI application.\n    1. Calls load_dotenv() to load environment variables.\n    2. Initializes the FastAPI app.\n    3. Adds CORSMiddleware with permissive settings.\n    4. Includes all application routers.\n    5. Calls Base.metadata.create_all(engine) to create database tables.\n    \n    Returns:\n        A configured FastAPI application instance.\n    \"\"\"\n    # Load environment variables from .env file.\n    load_dotenv()\n\n    # Initialize FastAPI app.\n    app = FastAPI()\n\n    # Configure CORS middleware to allow all origins.\n    app.add_middleware(\n        CORSMiddleware,\n        allow_origins=[\"*\"],\n        allow_credentials=True,\n        allow_methods=[\"*\"],\n        allow_headers=[\"*\"]\n    )\n\n    # Include application routers.\n    app.include_router(pipeline_router)\n\n    # Create database tables using SQLAlchemy metadata.\n    Base.metadata.create_all(bind=engine)\n\n    return app\n\napp = create_app()\n"
+          "content": "import os\nfrom dotenv import load_dotenv\n\n# Load environment variables before any other imports\nload_dotenv()\n\nfrom fastapi import FastAPI\nfrom fastapi.middleware.cors import CORSMiddleware\nfrom app.core.database.sql_adaptor import Base, engine\nfrom app.pipeline.pipeline_endpoint import router as pipeline_router\n\ndef create_app() -> FastAPI:\n    \"\"\"\n    Creates and configures the FastAPI application.\n\n    1. Initializes the FastAPI app.\n    2. Configures CORSMiddleware to allow all origins.\n    3. Includes all application routers.\n    4. Calls Base.metadata.create_all(engine) to create database tables.\n\n    Returns:\n        A configured FastAPI application instance.\n    \"\"\"\n    app = FastAPI()\n\n    # Configure CORS middleware to allow any origin, credentials, methods, and headers\n    app.add_middleware(\n        CORSMiddleware,\n        allow_origins=[\"*\"],\n        allow_credentials=True,\n        allow_methods=[\"*\"],\n        allow_headers=[\"*\"]\n    )\n\n    # Include the pipeline router\n    app.include_router(pipeline_router)\n\n    # Create all tables defined in the SQLAlchemy models\n    Base.metadata.create_all(bind=engine)\n\n    return app\n\napp = create_app()\n"
         }
       ],
-      "update_status": "to_update",
+      "update_status": "up_to_date",
       "is_deployed": false
     },
     {
@@ -217,12 +217,12 @@
         "name": "pipeline_endpoint",
         "namespace": "app.pipeline",
         "dependencies": [
-          "app.pipeline.google_ads_upload",
-          "app.pipeline.gmail_notification",
-          "app.pipeline.google_sheets_report",
-          "app.pipeline.store_success",
           "app.pipeline.salesforce_query",
-          "app.pipeline.filter_unprocessed"
+          "app.pipeline.filter_unprocessed",
+          "app.pipeline.gmail_notification",
+          "app.pipeline.google_ads_upload",
+          "app.pipeline.store_success",
+          "app.pipeline.google_sheets_report"
         ],
         "purpose": "Defines a FastAPI endpoint that calls all the pipeline modules sequentially. When this endpoint is accessed, it performs the following steps in order: (1) Calls salesforce_query to fetch data from Salesforce. (2) Calls filter_unprocessed to filter out already processed rows. (3) Calls google_ads_upload to upload conversions to Google Ads. (4) Calls store_success to log successful uploads in the database. (5) Calls google_sheets_report to generate a Google Sheets document containing both successful and failed uploads. (6) Calls gmail_notification to send an email via Gmail with the report link. Each step validates its output before proceeding to the next step and aggregates the results to return a comprehensive JSON report summarizing the pipeline execution.",
         "pypi_packages": [
