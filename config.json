@@ -33,6 +33,220 @@
       "files": [],
       "update_status": "to_update",
       "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "infrastructure",
+        "name": "CloudSQL",
+        "namespace": "External",
+        "config": {}
+      },
+      "files": [],
+      "update_status": "up_to_date",
+      "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "logic",
+        "name": "sql_adaptor",
+        "namespace": "app.core.database",
+        "dependencies": [],
+        "purpose": "1) Initializes Base, engine and SessionLocal. Uses the DB_URL environment variable.\n2) Defines get_session to yield a session.",
+        "pypi_packages": [
+          "psycopg2-binary==2.9.10",
+          "sqlalchemy==2.0.36"
+        ],
+        "is_endpoint": false
+      },
+      "files": [],
+      "update_status": "to_update",
+      "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "logic",
+        "name": "salesforce_query",
+        "namespace": "app.pipeline",
+        "dependencies": [],
+        "purpose": "Queries data from Salesforce using its API. It executes the following SOQL query:\n\nSELECT Id, GCLID__c, Name, Original_Lead_Created_Date_Time__c, Admission_Date__c \nFROM Opportunity \nWHERE StageName IN ('Admitted', 'Alumni')\nAND Original_Lead_Created_Date_Time__c = LAST_90_DAYS\n\nThe module returns a list/dictionary of rows obtained from Salesforce.\n\nFor auth, use Oauth 2.0:\nSALESFORCE_CLIENT_ID\nSALESFORCE_CLIENT_SECRET\nSALESFORCE_USERNAME\nSALESFORCE_PASSWORD",
+        "pypi_packages": [
+          "simple-salesforce==1.12.4"
+        ],
+        "is_endpoint": false
+      },
+      "files": [],
+      "update_status": "to_update",
+      "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "logic",
+        "name": "filter_unprocessed",
+        "namespace": "app.pipeline",
+        "dependencies": [],
+        "purpose": "Filters out rows that have already been processed. It takes the raw sales data provided as input (from salesforce_query when called by the orchestration endpoint) and returns only those rows that haven't been processed yet. This module may also log a count of filtered rows.",
+        "pypi_packages": [],
+        "is_endpoint": false
+      },
+      "files": [],
+      "update_status": "to_update",
+      "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "logic",
+        "name": "google_ads_upload",
+        "namespace": "app.pipeline",
+        "dependencies": [
+          "app.core.google_auth.google_auth"
+        ],
+        "purpose": "Uploads conversions to Google Ads using the Google Ads API. This module requires an access token provided by the google_auth module (app.core.google_auth.google_auth) to authenticate API calls. It takes the filtered records provided as input (from filter_unprocessed when called via an orchestration endpoint) and attempts conversion uploads. It returns the results of each upload attempt, including success and error details, and applies appropriate error handling and logging for failed uploads.\n\nUse:\nGADS_DEVELOPER_TOKEN\nGADS_LOGIN_CUSTOMER_ID\nGADS_CLIENT_ID\nGADS_CLIENT_SECRET\nGADS_CUSTOMER",
+        "pypi_packages": [
+          "google-ads==13.0.0"
+        ],
+        "is_endpoint": false
+      },
+      "files": [],
+      "update_status": "to_update",
+      "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "logic",
+        "name": "store_success",
+        "namespace": "app.pipeline",
+        "dependencies": [],
+        "purpose": "Stores details of successful uploads into a database. This module logs each successful conversion upload along with metadata (e.g., timestamp, conversion id, status) for further audit and reporting. It utilizes SQLAlchemy sessions from the SQL adaptor for database interactions. The input data is provided from the google_ads_upload module when orchestrated by an endpoint.",
+        "pypi_packages": [
+          "sqlalchemy==2.0.36"
+        ],
+        "is_endpoint": false
+      },
+      "files": [],
+      "update_status": "to_update",
+      "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "logic",
+        "name": "google_sheets_report",
+        "namespace": "app.pipeline",
+        "dependencies": [
+          "app.core.google_auth.google_auth"
+        ],
+        "purpose": "Creates a Google Sheets report that contains both successful and failed upload records. This module requires an access token provided by the google_auth module (app.core.google_auth.google_auth) to authenticate API requests to the Google Sheets API. It generates a Google Sheets document, populates it with data provided by previous steps (google_ads_upload and store_success), and applies formatting for better readability.",
+        "pypi_packages": [
+          "gspread==5.10.0",
+          "google-auth==2.16.0"
+        ],
+        "is_endpoint": false
+      },
+      "files": [],
+      "update_status": "to_update",
+      "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "logic",
+        "name": "gmail_notification",
+        "namespace": "app.pipeline",
+        "dependencies": [
+          "app.core.google_auth.google_auth"
+        ],
+        "purpose": "Sends an email using Gmail containing the report link from the Google Sheets document. This module requires an access token provided by the google_auth module (app.core.google_auth.google_auth) to authenticate API calls to the Gmail API. It composes an email summarizing the successful and failed upload counts, attaches the report link, and sends the email via the Gmail API. It handles OAuth authentication and ensures appropriate error handling for email delivery.",
+        "pypi_packages": [
+          "google-api-python-client==2.70.0",
+          "google-auth==2.16.0"
+        ],
+        "is_endpoint": false
+      },
+      "files": [],
+      "update_status": "to_update",
+      "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "logic",
+        "name": "pipeline_endpoint",
+        "namespace": "app.pipeline",
+        "dependencies": [
+          "app.pipeline.salesforce_query",
+          "app.pipeline.filter_unprocessed",
+          "app.pipeline.google_ads_upload",
+          "app.pipeline.store_success",
+          "app.pipeline.google_sheets_report",
+          "app.pipeline.gmail_notification"
+        ],
+        "purpose": "Defines a FastAPI endpoint that calls all the pipeline modules sequentially. When this endpoint is accessed, it performs the following steps in order: (1) Calls salesforce_query to fetch data from Salesforce. (2) Calls filter_unprocessed to filter out already processed rows. (3) Calls google_ads_upload to upload conversions to Google Ads. (4) Calls store_success to log successful uploads in the database. (5) Calls google_sheets_report to generate a Google Sheets document containing both successful and failed uploads. (6) Calls gmail_notification to send an email via Gmail with the report link. Each step validates its output before proceeding to the next step and aggregates the results to return a comprehensive JSON report summarizing the pipeline execution.",
+        "pypi_packages": [
+          "fastapi==0.115.6"
+        ],
+        "is_endpoint": true
+      },
+      "files": [],
+      "update_status": "to_update",
+      "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "datamodel",
+        "name": "UploadStatus",
+        "namespace": "app.models",
+        "dependencies": [],
+        "fields": [
+          {
+            "name": "id",
+            "purpose": "Primary key for the upload record entry."
+          },
+          {
+            "name": "salesforce_id",
+            "purpose": "The Salesforce Opportunity Id from the query result."
+          },
+          {
+            "name": "gclid",
+            "purpose": "The GCLID value (GCLID__c) from the Salesforce record, used for conversion tracking."
+          },
+          {
+            "name": "original_lead_created_datetime",
+            "purpose": "The Original_Lead_Created_Date_Time__c field from the Salesforce record capturing when the lead was created."
+          },
+          {
+            "name": "admission_date",
+            "purpose": "The Admission_Date__c field from the Salesforce record indicating the date of admission."
+          },
+          {
+            "name": "status",
+            "purpose": "Upload status indicator, e.g., 'successful' or 'failed'."
+          },
+          {
+            "name": "timestamp",
+            "purpose": "The date and time when this upload status was recorded."
+          },
+          {
+            "name": "error_details",
+            "purpose": "Contains error details if the upload failed, otherwise null."
+          }
+        ]
+      },
+      "files": [],
+      "update_status": "to_update",
+      "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "logic",
+        "name": "google_auth",
+        "namespace": "app.core.google_auth",
+        "dependencies": [],
+        "purpose": "Handles Google OAuth authentication using credentials from environment variables. It uses OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, and OAUTH_REFRESH_TOKEN to obtain and refresh access tokens. This module provides the access token required for interacting with the Google Ads API, Google Sheets API, and Gmail API.",
+        "pypi_packages": [
+          "google-auth==2.16.0"
+        ],
+        "is_endpoint": false
+      },
+      "files": [],
+      "update_status": "to_update",
+      "is_deployed": false
     }
   ],
   "github": "https://github.com/Modular-Asembly/lgaleana_jts2"
