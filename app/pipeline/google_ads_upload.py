@@ -1,128 +1,83 @@
 import os
+import requests
+from datetime import datetime
 from typing import List, Dict, Any
-from google.ads.googleads.client import GoogleAdsClient
-from google.ads.googleads.errors import GoogleAdsException
+
 from app.core.google_auth.google_auth import get_access_token
 
-def _build_google_ads_config() -> dict:
-    """
-    Build configuration dictionary required to initialize GoogleAdsClient.
-    Environment variables used:
-      - GADS_DEVELOPER_TOKEN
-      - GADS_LOGIN_CUSTOMER_ID
-      - GADS_CLIENT_ID
-      - GADS_CLIENT_SECRET
-      - GADS_CUSTOMER
-    Additionally, obtain an OAuth2 access token via google_auth.
-    Returns:
-        Dictionary configuration for GoogleAdsClient.
-    Raises:
-        EnvironmentError: if any required environment variable is missing.
-    """
-    developer_token = os.getenv("GADS_DEVELOPER_TOKEN")
-    login_customer_id = os.getenv("GADS_LOGIN_CUSTOMER_ID")
-    client_id = os.getenv("GADS_CLIENT_ID")
-    client_secret = os.getenv("GADS_CLIENT_SECRET")
-    customer_id = os.getenv("GADS_CUSTOMER")
-    if not all([developer_token, login_customer_id, client_id, client_secret, customer_id]):
-        raise EnvironmentError("One or more required Google Ads environment variables are not set.")
-    
-    # Obtain OAuth2 access token using our custom google_auth module.
-    access_token = get_access_token()
-    
-    # Prepare configuration dictionary for GoogleAdsClient.
-    # Note: The configuration may contain non-string types.
-    config = {
-        "developer_token": developer_token,
-        "login_customer_id": login_customer_id,
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "refresh_token": "",  # Not used because we're providing an access token.
-        "use_proto_plus": True,
-        "access_token": access_token,
-        "customer_id": customer_id,  # Our default customer id value.
-    }
-    return config
-
-def _init_google_ads_client() -> GoogleAdsClient:
-    """
-    Initializes and returns a GoogleAdsClient instance using configuration from environment variables.
-    Returns:
-        An instance of GoogleAdsClient.
-    """
-    config = _build_google_ads_config()
-    # GoogleAdsClient can be initialized from dictionary config.
-    client = GoogleAdsClient.load_from_dict(config, version="v22")
-    return client
 
 def upload_conversions(filtered_records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Uploads conversions to Google Ads using the Google Ads API.
-    For each record in filtered_records, constructs a conversion object and uploads it.
-    Uses the ConversionUploadService to perform the upload.
-    Each record is expected to contain at least:
-      - 'salesforce_id': str, unique identifier for the conversion.
-      - 'gclid': str, the Google Click Identifier.
-      - 'conversion_date_time': str, in the format "yyyy-mm-dd hh:mm:ss" (required by Google Ads API).
-      - 'conversion_value': float, the value for the conversion (optional, default to 0.0 if missing).
-    Returns:
-        A list of dictionaries with the upload result for each conversion.
-        Each dictionary contains:
-            - 'salesforce_id': str
-            - 'status': 'success' or 'failure' or 'partial_success'
-            - 'error': Optional error message in case of failure.
-    Raises:
-        GoogleAdsException: Errors from the Google Ads API will be raised.
-    """
-    client = _init_google_ads_client()
-    conversion_service = client.get_service("ConversionUploadService")
-    results: List[Dict[str, Any]] = []
+    action_id = 462477827
+    customer_id = os.getenv("GADS_CUSTOMER")
+    api_version = "v18"
 
-    # Build a list of click conversion objects.
-    conversions = []
+    access_token = get_access_token()
+
+    conversion_objects = []
     for record in filtered_records:
-        gclid = record.get("gclid")
-        conversion_date_time = record.get("conversion_date_time")
-        conversion_value = record.get("conversion_value", 0.0)
-        salesforce_id = record.get("salesforce_id")
+        lead_created_time = record.get(
+            "Original_Lead_Created_Date_Time__c"
+        ) or record.get("Admission_Date__c")
+        gclid = record.get("GCLID__c")
 
-        if not (gclid and conversion_date_time and salesforce_id):
-            results.append({
-                "salesforce_id": salesforce_id if salesforce_id is not None else "",
-                "status": "failure",
-                "error": "Missing required fields: gclid, conversion_date_time, or salesforce_id."
-            })
+        if not (gclid and lead_created_time):
             continue
 
-        conversion = client.get_type("ClickConversion")
-        conversion.gclid = gclid
-        conversion.conversion_action = f"customers/{os.getenv('GADS_CUSTOMER')}/conversionActions/{salesforce_id}"
-        conversion.conversion_date_time = conversion_date_time
-        conversion.conversion_value = float(conversion_value)
-        conversions.append(conversion)
+        formatted_date = datetime.strptime(lead_created_time, "%Y-%m-%dT%H:%M:%S.%f%z")
+        formatted_date = formatted_date.strftime("%Y-%m-%d %H:%M:%S%z")
+        formatted_date = formatted_date[:-2] + ":" + formatted_date[-2:]
 
-    if not conversions:
-        return results
+        conversion = {
+            "conversionAction": f"customers/{customer_id}/conversionActions/{action_id}",
+            "gclid": gclid,
+            "conversionValue": 1,
+            "conversionDateTime": formatted_date,
+            "currencyCode": "USD",
+        }
+        conversion_objects.append(conversion)
 
-    request = client.get_type("UploadClickConversionsRequest")
-    request.customer_id = os.getenv("GADS_CUSTOMER")
-    request.conversions.extend(conversions)
-    request.partial_failure = True
+    if not conversion_objects:
+        return []
 
-    response = conversion_service.upload_click_conversions(request=request)
+    url = f"https://googleads.googleapis.com/{api_version}/customers/{customer_id}:uploadClickConversions"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "developer-token": os.getenv("GADS_DEVELOPER_TOKEN"),
+        "login-customer-id": os.getenv("GADS_LOGIN_CUSTOMER_ID"),
+    }
+    payload = {
+        "conversions": conversion_objects,
+        "partialFailure": True,
+    }
 
-    for conv_result in response.results:
-        results.append({
-            "salesforce_id": conv_result.conversion_action.split("/")[-1],
-            "status": "success",
-            "error": None
-        })
+    response = requests.post(url, headers=headers, json=payload)
+    if not response.ok:
+        print(response.text)
+        response.raise_for_status()
 
-    if response.partial_failure_error:
-        failure_message = response.partial_failure_error.message
-        for record in results:
-            if record["status"] == "success":
-                record["status"] = "partial_success"
-                record["error"] = failure_message
+    conversion_response = response.json()
+    results = []
+    if "partialFailureError" in conversion_response:
+        # Extract error details
+        error_details = conversion_response["partialFailureError"]["details"][0][
+            "errors"
+        ]
+        error_by_index = {
+            error["location"]["fieldPathElements"][0]["index"]: error
+            for error in error_details
+        }
+
+        # Map results with original GCLIDs
+        for idx, original_conversion in enumerate(conversion_objects):
+            result = {"gclid": original_conversion["gclid"]}
+            if idx in error_by_index:
+                result["error"] = error_by_index[idx]
+            else:
+                # Copy successful conversion data
+                result.update(conversion_response["results"][idx])
+            results.append(result)
+    else:
+        results = conversion_response.get("results", [])
 
     return results

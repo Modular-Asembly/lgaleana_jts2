@@ -74,6 +74,7 @@ def query_salesforce() -> List[Dict[str, Any]]:
     
     Returns:
         A list of dictionaries where each dictionary represents a row from the query result.
+        Records where GCLID__c is None are filtered out.
     """
     sf = get_salesforce_connection()
     soql_query = (
@@ -88,4 +89,6 @@ def query_salesforce() -> List[Dict[str, Any]]:
     # Remove attributes added by simple_salesforce for a clean response.
     for record in records:
         record.pop('attributes', None)
+    # Filter out records where GCLID__c is None
+    records = [record for record in records if record.get('GCLID__c') is not None]
     return records

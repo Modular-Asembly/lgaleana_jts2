@@ -27,21 +27,23 @@ def partition_upload_results(
     Assumes:
       - Each record in filtered_data has keys: "Id", "GCLID__c",
         "Original_Lead_Created_Date_Time__c", "Admission_Date__c".
-      - Each record in upload_results has keys: "salesforce_id", "status", and "error".
+      - Each record in upload_results has keys: "gclid", "conversionAction", and potentially "error".
+      Success is determined by the presence of conversionAction in the result.
     """
     success_data: List[Dict[str, Any]] = []
     failed_data: List[Dict[str, Any]] = []
 
-    # Create a lookup dict for original records by Salesforce Id
-    record_lookup = {record["Id"]: record for record in filtered_data}
+    # Create a lookup dict for original records by GCLID
+    record_lookup = {record["GCLID__c"]: record for record in filtered_data}
 
     for result in upload_results:
-        sf_id = result.get("salesforce_id")
-        if result.get("status") == "success":
-            orig = record_lookup.get(sf_id, {})
+        gclid = result.get("gclid")
+        orig = record_lookup.get(gclid, {})
+        
+        if "conversionAction" in result:
             success_data.append({
-                "salesforce_id": sf_id,
-                "gclid": orig.get("GCLID__c"),
+                "salesforce_id": orig.get("Id"),
+                "gclid": gclid,
                 "original_lead_created_datetime": orig.get("Original_Lead_Created_Date_Time__c"),
                 "admission_date": orig.get("Admission_Date__c"),
                 "status": "successful",
@@ -49,9 +51,10 @@ def partition_upload_results(
             })
         else:
             failed_data.append({
-                "salesforce_id": sf_id if sf_id is not None else "",
+                "salesforce_id": orig.get("Id", ""),
                 "error": result.get("error", "Unknown error")
             })
+    
     return success_data, failed_data
 
 
