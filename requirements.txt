@@ -1,8 +1,6 @@
 fastapi==0.115.6
 google-ads==22.0.0
-google-api-python-client==2.70.0
 google-auth==2.16.0
-gspread==5.10.0
 mypy==1.15.0
 psycopg2-binary==2.9.10
 pydantic==2.10.4

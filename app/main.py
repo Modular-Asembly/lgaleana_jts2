@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 
-# Load environment variables before any other imports
+# Load environment variables before any other import
 load_dotenv()
 
 from fastapi import FastAPI
@@ -13,19 +13,19 @@ from typing import Any
 def create_app() -> FastAPI:
     """
     Creates and configures the FastAPI application.
-    
+
     Steps:
       1. Initializes the FastAPI app.
-      2. Configures CORSMiddleware to allow all origins, credentials, methods, and headers.
-      3. Includes the application routers.
+      2. Configures CORS middleware to allow all origins, credentials, methods, and headers.
+      3. Includes the pipeline router.
       4. Calls Base.metadata.create_all(engine) to create all database tables.
-    
+
     Returns:
         A configured FastAPI application instance.
     """
     app: FastAPI = FastAPI()
 
-    # Configure CORS middleware with all origins allowed
+    # Configure CORS middleware with all origins allowed.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -34,13 +34,13 @@ def create_app() -> FastAPI:
         allow_headers=["*"]
     )
 
-    # Include the pipeline router
+    # Include the pipeline router.
     app.include_router(pipeline_router)
 
-    # Create all tables defined in the SQLAlchemy models
+    # Create all tables defined in the SQLAlchemy models.
     Base.metadata.create_all(bind=engine)
 
     return app
 
-# Create the FastAPI application instance to be imported elsewhere
+# Create the FastAPI application instance to be imported elsewhere.
 app: FastAPI = create_app()
