@@ -19,7 +19,8 @@
         "name": "main",
         "namespace": "app",
         "dependencies": [
-          "Models and endpoints"
+          "app.core.database.sql_adaptor",
+          "app.pipeline.pipeline_endpoint"
         ],
         "purpose": "1) Calls load_dotenv() before anything else.\n2) Initializes the FastAPI app.\n3) Adds CORSMiddleware with *.\n4) Adds all the application routers.\n5) Calls Base.metadata.create_all(engine).",
         "pypi_packages": [
@@ -30,8 +31,13 @@
         ],
         "is_endpoint": false
       },
-      "files": [],
-      "update_status": "to_update",
+      "files": [
+        {
+          "path": "app/main.py",
+          "content": "from fastapi import FastAPI\nfrom fastapi.middleware.cors import CORSMiddleware\nfrom dotenv import load_dotenv\n\nfrom app.core.database.sql_adaptor import Base, engine\nfrom app.pipeline.pipeline_endpoint import router as pipeline_router\n\ndef create_app() -> FastAPI:\n    \"\"\"\n    Creates and configures the FastAPI application.\n    1. Calls load_dotenv() to load environment variables.\n    2. Initializes the FastAPI app.\n    3. Adds CORSMiddleware with permissive settings.\n    4. Includes all application routers.\n    5. Calls Base.metadata.create_all(engine) to create database tables.\n    \n    Returns:\n        A configured FastAPI application instance.\n    \"\"\"\n    # Load environment variables from .env file.\n    load_dotenv()\n\n    # Initialize FastAPI app.\n    app = FastAPI()\n\n    # Configure CORS middleware to allow all origins.\n    app.add_middleware(\n        CORSMiddleware,\n        allow_origins=[\"*\"],\n        allow_credentials=True,\n        allow_methods=[\"*\"],\n        allow_headers=[\"*\"]\n    )\n\n    # Include application routers.\n    app.include_router(pipeline_router)\n\n    # Create database tables using SQLAlchemy metadata.\n    Base.metadata.create_all(bind=engine)\n\n    return app\n\napp = create_app()\n"
+        }
+      ],
+      "update_status": "up_to_date",
       "is_deployed": false
     },
     {
@@ -58,8 +64,13 @@
         ],
         "is_endpoint": false
       },
-      "files": [],
-      "update_status": "to_update",
+      "files": [
+        {
+          "path": "app/core/database/sql_adaptor.py",
+          "content": "import os\nfrom sqlalchemy import create_engine\nfrom sqlalchemy.orm import sessionmaker, declarative_base, Session\nfrom typing import Iterator\n\n# Retrieve the database URL from environment variables.\nDB_URL: str = os.getenv(\"DB_URL\", \"\")\nif not DB_URL:\n    raise EnvironmentError(\"DB_URL environment variable is not set.\")\n\n# Initialize the SQLAlchemy engine using the provided DB_URL.\nengine = create_engine(DB_URL, echo=False)\n\n# Create a configured \"SessionLocal\" class.\nSessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)\n\n# Create a Base class for declarative class definitions.\nBase = declarative_base()\n\ndef get_session() -> Iterator[Session]:\n    \"\"\"\n    Creates a new SQLAlchemy Session, yields it for use in database interactions,\n    and ensures it is closed after its usage.\n    \"\"\"\n    session: Session = SessionLocal()\n    try:\n        yield session\n    finally:\n        session.close()\n"
+        }
+      ],
+      "update_status": "up_to_date",
       "is_deployed": false
     },
     {
@@ -74,8 +85,13 @@
         ],
         "is_endpoint": false
       },
-      "files": [],
-      "update_status": "to_update",
+      "files": [
+        {
+          "path": "app/pipeline/salesforce_query.py",
+          "content": "import os\nimport requests\nfrom typing import List, Dict, Any\nfrom simple_salesforce import Salesforce\n\ndef get_salesforce_access_token() -> Dict[str, str]:\n    \"\"\"\n    Obtains an OAuth 2.0 access token from Salesforce using credentials from environment variables.\n    \n    Expected environment variables:\n    - SALESFORCE_CLIENT_ID\n    - SALESFORCE_CLIENT_SECRET\n    - SALESFORCE_USERNAME\n    - SALESFORCE_PASSWORD\n    - SALESFORCE_SECURITY_TOKEN (optional, if required by your Salesforce org)\n    \n    Returns:\n        A dictionary containing 'access_token' and 'instance_url'.\n    \"\"\"\n    token_url = \"https://login.salesforce.com/services/oauth2/token\"\n    client_id = os.getenv(\"SALESFORCE_CLIENT_ID\")\n    client_secret = os.getenv(\"SALESFORCE_CLIENT_SECRET\")\n    username = os.getenv(\"SALESFORCE_USERNAME\")\n    password = os.getenv(\"SALESFORCE_PASSWORD\")\n    # Optional security token\n    security_token = os.getenv(\"SALESFORCE_SECURITY_TOKEN\", \"\")\n\n    if not (client_id and client_secret and username and password):\n        raise EnvironmentError(\"One or more Salesforce OAuth environment variables are not set.\")\n\n    # Combine password and security token if token is provided\n    pwd_combined = password + security_token\n\n    payload = {\n        \"grant_type\": \"password\",\n        \"client_id\": client_id,\n        \"client_secret\": client_secret,\n        \"username\": username,\n        \"password\": pwd_combined\n    }\n\n    response = requests.post(token_url, data=payload)\n    response.raise_for_status()  # Let errors raise if the request failed\n    auth_response = response.json()\n\n    if \"access_token\" not in auth_response or \"instance_url\" not in auth_response:\n        raise ValueError(\"Salesforce OAuth response does not contain access_token or instance_url.\")\n\n    return {\n        \"access_token\": auth_response[\"access_token\"],\n        \"instance_url\": auth_response[\"instance_url\"]\n    }\n\ndef get_salesforce_connection() -> Salesforce:\n    \"\"\"\n    Creates and returns a Salesforce connection using an OAuth access token.\n    \n    Returns:\n        An instance of simple_salesforce.Salesforce.\n    \"\"\"\n    auth_data = get_salesforce_access_token()\n    # Create a Salesforce connection using the access token.\n    sf = Salesforce(instance_url=auth_data[\"instance_url\"], session_id=auth_data[\"access_token\"], version=\"55.0\")\n    return sf\n\ndef query_salesforce() -> List[Dict[str, Any]]:\n    \"\"\"\n    Queries Salesforce using its API. Executes the following SOQL query:\n    \n    SELECT Id, GCLID__c, Name, Original_Lead_Created_Date_Time__c, Admission_Date__c \n    FROM Opportunity \n    WHERE StageName IN ('Admitted', 'Alumni')\n    AND Original_Lead_Created_Date_Time__c = LAST_90_DAYS\n    \n    Returns:\n        A list of dictionaries where each dictionary represents a row from the query result.\n    \"\"\"\n    sf = get_salesforce_connection()\n    soql_query = (\n        \"SELECT Id, GCLID__c, Name, Original_Lead_Created_Date_Time__c, Admission_Date__c \"\n        \"FROM Opportunity \"\n        \"WHERE StageName IN ('Admitted', 'Alumni') \"\n        \"AND Original_Lead_Created_Date_Time__c = LAST_90_DAYS\"\n    )\n    # Use query_all to ensure all records are retrieved.\n    result = sf.query_all(soql_query)\n    records = result.get(\"records\", [])\n    # Remove attributes added by simple_salesforce for a clean response.\n    for record in records:\n        record.pop('attributes', None)\n    return records\n"
+        }
+      ],
+      "update_status": "up_to_date",
       "is_deployed": false
     },
     {
@@ -83,13 +99,21 @@
         "type": "logic",
         "name": "filter_unprocessed",
         "namespace": "app.pipeline",
-        "dependencies": [],
+        "dependencies": [
+          "app.models.UploadStatus",
+          "app.core.database.sql_adaptor"
+        ],
         "purpose": "Filters out rows that have already been processed. It takes the raw sales data provided as input (from salesforce_query when called by the orchestration endpoint) and returns only those rows that haven't been processed yet. This module may also log a count of filtered rows.",
         "pypi_packages": [],
         "is_endpoint": false
       },
-      "files": [],
-      "update_status": "to_update",
+      "files": [
+        {
+          "path": "app/pipeline/filter_unprocessed.py",
+          "content": "import os\nfrom typing import List, Dict, Any\nfrom app.core.database.sql_adaptor import SessionLocal\nfrom app.models.upload_status import UploadStatus\n\ndef filter_unprocessed(sales_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:\n    \"\"\"\n    Filters out rows that have already been processed.\n    It checks each record from the raw sales data (provided by salesforce_query)\n    against the UploadStatus records in the database.\n    \n    A record is considered processed if its Salesforce ID is already present in the database.\n    \n    Args:\n        sales_data: List of dictionaries containing sales data, where each dictionary\n                    is expected to have an \"Id\" key representing the Salesforce Opportunity Id.\n    \n    Returns:\n        List of dictionaries that haven't been processed yet.\n        \n    Raises:\n        Any exceptions raised by database queries will propagate.\n    \"\"\"\n    # Open a new database session.\n    with SessionLocal() as session:\n        # Retrieve a set of all processed Salesforce IDs from the upload_status table.\n        processed_records = session.query(UploadStatus.salesforce_id).all()\n        processed_ids = {record[0] for record in processed_records}\n\n    # Filter sales data to include only rows which haven't been processed.\n    filtered_data = [row for row in sales_data if row.get(\"Id\") not in processed_ids]\n\n    # Log the count of filtered records.\n    filtered_count = len(sales_data) - len(filtered_data)\n    print(f\"[filter_unprocessed] Filtered out {filtered_count} records that were already processed.\")\n\n    return filtered_data\n"
+        }
+      ],
+      "update_status": "up_to_date",
       "is_deployed": false
     },
     {
@@ -106,8 +130,13 @@
         ],
         "is_endpoint": false
       },
-      "files": [],
-      "update_status": "to_update",
+      "files": [
+        {
+          "path": "app/pipeline/google_ads_upload.py",
+          "content": "import os\nfrom typing import List, Dict, Any\nfrom google.ads.googleads.client import GoogleAdsClient\nfrom google.ads.googleads.errors import GoogleAdsException\nfrom app.core.google_auth.google_auth import get_access_token\n\ndef _build_google_ads_config() -> dict:\n    \"\"\"\n    Build configuration dictionary required to initialize GoogleAdsClient.\n    Environment variables used:\n      - GADS_DEVELOPER_TOKEN\n      - GADS_LOGIN_CUSTOMER_ID\n      - GADS_CLIENT_ID\n      - GADS_CLIENT_SECRET\n      - GADS_CUSTOMER\n    Additionally, obtain an OAuth2 access token via google_auth.\n    Returns:\n        Dictionary configuration for GoogleAdsClient.\n    Raises:\n        EnvironmentError: if any required environment variable is missing.\n    \"\"\"\n    developer_token = os.getenv(\"GADS_DEVELOPER_TOKEN\")\n    login_customer_id = os.getenv(\"GADS_LOGIN_CUSTOMER_ID\")\n    client_id = os.getenv(\"GADS_CLIENT_ID\")\n    client_secret = os.getenv(\"GADS_CLIENT_SECRET\")\n    customer_id = os.getenv(\"GADS_CUSTOMER\")\n    if not all([developer_token, login_customer_id, client_id, client_secret, customer_id]):\n        raise EnvironmentError(\"One or more required Google Ads environment variables are not set.\")\n    \n    # Obtain OAuth2 access token using our custom google_auth module.\n    access_token = get_access_token()\n    \n    # Prepare configuration dictionary for GoogleAdsClient.\n    # Note: The configuration may contain non-string types.\n    config = {\n        \"developer_token\": developer_token,\n        \"login_customer_id\": login_customer_id,\n        \"client_id\": client_id,\n        \"client_secret\": client_secret,\n        \"refresh_token\": \"\",  # Not used because we're providing an access token.\n        \"use_proto_plus\": True,\n        \"access_token\": access_token,\n        \"customer_id\": customer_id,  # Our default customer id value.\n    }\n    return config\n\ndef _init_google_ads_client() -> GoogleAdsClient:\n    \"\"\"\n    Initializes and returns a GoogleAdsClient instance using configuration from environment variables.\n    Returns:\n        An instance of GoogleAdsClient.\n    \"\"\"\n    config = _build_google_ads_config()\n    # GoogleAdsClient can be initialized from dictionary config.\n    client = GoogleAdsClient.load_from_dict(config, version=\"v22\")\n    return client\n\ndef upload_conversions(filtered_records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:\n    \"\"\"\n    Uploads conversions to Google Ads using the Google Ads API.\n    For each record in filtered_records, constructs a conversion object and uploads it.\n    Uses the ConversionUploadService to perform the upload.\n    Each record is expected to contain at least:\n      - 'salesforce_id': str, unique identifier for the conversion.\n      - 'gclid': str, the Google Click Identifier.\n      - 'conversion_date_time': str, in the format \"yyyy-mm-dd hh:mm:ss\" (required by Google Ads API).\n      - 'conversion_value': float, the value for the conversion (optional, default to 0.0 if missing).\n    Returns:\n        A list of dictionaries with the upload result for each conversion.\n        Each dictionary contains:\n            - 'salesforce_id': str\n            - 'status': 'success' or 'failure' or 'partial_success'\n            - 'error': Optional error message in case of failure.\n    Raises:\n        GoogleAdsException: Errors from the Google Ads API will be raised.\n    \"\"\"\n    client = _init_google_ads_client()\n    conversion_service = client.get_service(\"ConversionUploadService\")\n    results: List[Dict[str, Any]] = []\n\n    # Build a list of click conversion objects.\n    conversions = []\n    for record in filtered_records:\n        gclid = record.get(\"gclid\")\n        conversion_date_time = record.get(\"conversion_date_time\")\n        conversion_value = record.get(\"conversion_value\", 0.0)\n        salesforce_id = record.get(\"salesforce_id\")\n\n        if not (gclid and conversion_date_time and salesforce_id):\n            results.append({\n                \"salesforce_id\": salesforce_id if salesforce_id is not None else \"\",\n                \"status\": \"failure\",\n                \"error\": \"Missing required fields: gclid, conversion_date_time, or salesforce_id.\"\n            })\n            continue\n\n        conversion = client.get_type(\"ClickConversion\")\n        conversion.gclid = gclid\n        conversion.conversion_action = f\"customers/{os.getenv('GADS_CUSTOMER')}/conversionActions/{salesforce_id}\"\n        conversion.conversion_date_time = conversion_date_time\n        conversion.conversion_value = float(conversion_value)\n        conversions.append(conversion)\n\n    if not conversions:\n        return results\n\n    request = client.get_type(\"UploadClickConversionsRequest\")\n    request.customer_id = os.getenv(\"GADS_CUSTOMER\")\n    request.conversions.extend(conversions)\n    request.partial_failure = True\n\n    response = conversion_service.upload_click_conversions(request=request)\n\n    for conv_result in response.results:\n        results.append({\n            \"salesforce_id\": conv_result.conversion_action.split(\"/\")[-1],\n            \"status\": \"success\",\n            \"error\": None\n        })\n\n    if response.partial_failure_error:\n        failure_message = response.partial_failure_error.message\n        for record in results:\n            if record[\"status\"] == \"success\":\n                record[\"status\"] = \"partial_success\"\n                record[\"error\"] = failure_message\n\n    return results\n"
+        }
+      ],
+      "update_status": "up_to_date",
       "is_deployed": false
     },
     {
@@ -115,15 +144,23 @@
         "type": "logic",
         "name": "store_success",
         "namespace": "app.pipeline",
-        "dependencies": [],
+        "dependencies": [
+          "app.models.UploadStatus",
+          "app.core.database.sql_adaptor"
+        ],
         "purpose": "Stores details of successful uploads into a database. This module logs each successful conversion upload along with metadata (e.g., timestamp, conversion id, status) for further audit and reporting. It utilizes SQLAlchemy sessions from the SQL adaptor for database interactions. The input data is provided from the google_ads_upload module when orchestrated by an endpoint.",
         "pypi_packages": [
           "sqlalchemy==2.0.36"
         ],
         "is_endpoint": false
       },
-      "files": [],
-      "update_status": "to_update",
+      "files": [
+        {
+          "path": "app/pipeline/store_success.py",
+          "content": "import datetime\nfrom typing import List, Dict, Any\n\nfrom sqlalchemy.orm import Session\nfrom app.core.database.sql_adaptor import SessionLocal\nfrom app.models.upload_status import UploadStatus\n\ndef store_success_records(success_data: List[Dict[str, Any]]) -> List[UploadStatus]:\n    \"\"\"\n    Stores details of successful conversion uploads into the database.\n    \n    Each record in success_data is expected to be a dictionary with the following keys:\n      - 'salesforce_id': str - The Salesforce Opportunity Id.\n      - 'gclid': Optional[str] - The GCLID value from the Salesforce record.\n      - 'original_lead_created_datetime': datetime or ISO formatted str - When the lead was created.\n      - 'admission_date': datetime or ISO formatted str - The date of admission.\n      - 'status': str - The upload status, expected to be 'successful'.\n      - 'error_details': Optional[str] - Should be None or empty for successful uploads.\n      \n    Returns:\n        A list of UploadStatus instances that have been stored in the database.\n    \n    Raises:\n        Any exceptions raised during database operations.\n    \"\"\"\n    stored_records: List[UploadStatus] = []\n    \n    # Open a new database session.\n    with SessionLocal() as session:\n        # Iterate over each record from the input data.\n        for record in success_data:\n            # Parse datetime fields if they are provided as strings.\n            # If they are already datetime objects, they remain unchanged.\n            original_lead_created_datetime = record.get(\"original_lead_created_datetime\")\n            if isinstance(original_lead_created_datetime, str):\n                original_lead_created_datetime = datetime.datetime.fromisoformat(original_lead_created_datetime)\n            \n            admission_date = record.get(\"admission_date\")\n            if isinstance(admission_date, str):\n                admission_date = datetime.datetime.fromisoformat(admission_date)\n            \n            upload_status = UploadStatus(\n                salesforce_id=record[\"salesforce_id\"],\n                gclid=record.get(\"gclid\"),\n                original_lead_created_datetime=original_lead_created_datetime,\n                admission_date=admission_date,\n                status=record[\"status\"],\n                error_details=record.get(\"error_details\")\n            )\n            \n            session.add(upload_status)\n            stored_records.append(upload_status)\n        \n        session.commit()\n        # Refresh all instances to reflect data from the database (e.g., autogenerated id, timestamp)\n        for rec in stored_records:\n            session.refresh(rec)\n    \n    return stored_records\n"
+        }
+      ],
+      "update_status": "up_to_date",
       "is_deployed": false
     },
     {
@@ -141,8 +178,13 @@
         ],
         "is_endpoint": false
       },
-      "files": [],
-      "update_status": "to_update",
+      "files": [
+        {
+          "path": "app/pipeline/google_sheets_report.py",
+          "content": "import os\nfrom typing import List, Dict, Any\n\nimport gspread\nfrom google.oauth2.credentials import Credentials\n\nfrom app.core.google_auth.google_auth import get_google_oauth_credentials\n\ndef create_spreadsheet_report(success_records: List[Dict[str, Any]], \n                                failed_records: List[Dict[str, Any]]) -> str:\n    \"\"\"\n    Creates a Google Sheets report containing both successful and failed upload records.\n    Uses credentials from app.core.google_auth.google_auth to authenticate with Google Sheets API.\n    \n    Args:\n        success_records: List of dictionaries representing successful uploads.\n        failed_records: List of dictionaries representing failed uploads.\n    \n    Returns:\n        URL of the created Google Sheets document.\n    \n    Raises:\n        Any exceptions raised by gspread or google-auth.\n    \"\"\"\n    # Obtain OAuth2 credentials required by gspread\n    creds: Credentials = get_google_oauth_credentials()\n    \n    # Authorize gspread client using the credentials\n    client: gspread.Client = gspread.authorize(creds)\n    \n    # Define spreadsheet title from environment variable or default value\n    sheet_title: str = os.getenv(\"GOOGLE_SHEETS_REPORT_TITLE\", \"Uploads Report\")\n    \n    # Create new spreadsheet\n    spreadsheet = client.create(sheet_title)\n    \n    # Share the spreadsheet with the service account email if provided\n    service_account_email: str = os.getenv(\"SERVICE_ACCOUNT_EMAIL\", \"\")\n    if service_account_email:\n        spreadsheet.share(service_account_email, perm_type='user', role='writer')\n\n    # Prepare header rows for both worksheets\n    success_headers = [\"Salesforce ID\", \"GCLID\", \"Original Lead Created\", \"Admission Date\", \"Status\", \"Error Details\"]\n    failed_headers = [\"Salesforce ID\", \"Error Details\"]\n    \n    # Create a worksheet for successful uploads and populate with header and data rows\n    try:\n        worksheet_success = spreadsheet.worksheet(\"Successful Uploads\")\n    except gspread.WorksheetNotFound:\n        worksheet_success = spreadsheet.add_worksheet(title=\"Successful Uploads\", rows=\"100\", cols=\"20\")\n    worksheet_success.clear()\n    worksheet_success.append_row(success_headers)\n    for record in success_records:\n        row = [\n            record.get(\"salesforce_id\", \"\"),\n            record.get(\"gclid\", \"\"),\n            record.get(\"original_lead_created_datetime\", \"\"),\n            record.get(\"admission_date\", \"\"),\n            record.get(\"status\", \"\"),\n            record.get(\"error_details\", \"\")\n        ]\n        worksheet_success.append_row(row)\n    \n    # Create a worksheet for failed uploads and populate with header and data rows\n    try:\n        worksheet_failed = spreadsheet.worksheet(\"Failed Uploads\")\n    except gspread.WorksheetNotFound:\n        worksheet_failed = spreadsheet.add_worksheet(title=\"Failed Uploads\", rows=\"100\", cols=\"10\")\n    worksheet_failed.clear()\n    worksheet_failed.append_row(failed_headers)\n    for record in failed_records:\n        row = [\n            record.get(\"salesforce_id\", \"\"),\n            record.get(\"error\", \"\")\n        ]\n        worksheet_failed.append_row(row)\n    \n    # Apply basic formatting (e.g., set column widths) if needed.\n    # This example sets format by auto-resizing columns for both sheets.\n    worksheet_success.resize(rows=1+len(success_records))\n    worksheet_failed.resize(rows=1+len(failed_records))\n    \n    # Return the URL of the created spreadsheet\n    return spreadsheet.url\n\ndef generate_google_sheets_report(success_records: List[Dict[str, Any]], \n                                  failed_records: List[Dict[str, Any]]) -> Dict[str, Any]:\n    \"\"\"\n    Generates a Google Sheets report containing successful and failed upload records.\n    This function is designed to be called by the pipeline orchestration service.\n    \n    Args:\n        success_records: List of dicts with details of successful uploads.\n        failed_records: List of dicts with details of failed uploads.\n    \n    Returns:\n        A dictionary containing:\n            - 'spreadsheet_url': URL to the Google Sheets report.\n            - 'success_count': Number of successful records.\n            - 'failed_count': Number of failed records.\n    \n    Raises:\n        Any exceptions raised during report creation.\n    \"\"\"\n    spreadsheet_url: str = create_spreadsheet_report(success_records, failed_records)\n    \n    report_summary: Dict[str, Any] = {\n        \"spreadsheet_url\": spreadsheet_url,\n        \"success_count\": len(success_records),\n        \"failed_count\": len(failed_records)\n    }\n    return report_summary\n"
+        }
+      ],
+      "update_status": "up_to_date",
       "is_deployed": false
     },
     {
@@ -160,8 +202,13 @@
         ],
         "is_endpoint": false
       },
-      "files": [],
-      "update_status": "to_update",
+      "files": [
+        {
+          "path": "app/pipeline/gmail_notification.py",
+          "content": "import os\nimport base64\nfrom email.mime.text import MIMEText\nfrom typing import Dict\n\nfrom googleapiclient.discovery import build\nfrom google.auth.credentials import Credentials\nfrom app.core.google_auth.google_auth import get_google_oauth_credentials\n\n\ndef create_email_message(sender: str, to: str, subject: str, body: str) -> Dict[str, str]:\n    \"\"\"\n    Creates a raw email message for Gmail API.\n\n    Args:\n        sender: Email address of the sender.\n        to: Email address of the receiver.\n        subject: Subject of the email.\n        body: Body text of the email.\n\n    Returns:\n        A dictionary containing the raw email message ready for the Gmail API.\n    \"\"\"\n    message = MIMEText(body)\n    message[\"to\"] = to\n    message[\"from\"] = sender\n    message[\"subject\"] = subject\n    # Gmail API requires base64url encoded string.\n    raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()\n    return {\"raw\": raw_message}\n\n\ndef send_email_report(success_count: int, failed_count: int, report_url: str) -> Dict[str, str]:\n    \"\"\"\n    Sends an email using the Gmail API containing the report link of the Google Sheets document.\n\n    The email summarizes the successful and failed upload counts and includes the URL of the report.\n    Relies on Google OAuth credentials from the google_auth module.\n\n    Environment Variables:\n        GMAIL_SENDER: Sender's email address.\n        GMAIL_RECIPIENT: Recipient's email address.\n        GMAIL_EMAIL_SUBJECT: Subject line for the email (optional, default provided).\n\n    Args:\n        success_count: Number of successful uploads.\n        failed_count: Number of failed uploads.\n        report_url: URL string of the Google Sheets report.\n\n    Returns:\n        A dictionary with keys 'status' and 'message' indicating the result of the email delivery.\n    \n    Raises:\n        googleapiclient.errors.HttpError: When the Gmail API call fails.\n    \"\"\"\n    gmail_sender = os.getenv(\"GMAIL_SENDER\")\n    gmail_recipient = os.getenv(\"GMAIL_RECIPIENT\")\n    email_subject = os.getenv(\"GMAIL_EMAIL_SUBJECT\", \"Upload Report Notification\")\n\n    if not gmail_sender or not gmail_recipient:\n        raise EnvironmentError(\"GMAIL_SENDER and GMAIL_RECIPIENT environment variables must be set.\")\n\n    # Prepare the email body\n    email_body = (\n        f\"Hello,\\n\\n\"\n        f\"Please find the upload report details below:\\n\"\n        f\"Successful Uploads: {success_count}\\n\"\n        f\"Failed Uploads: {failed_count}\\n\"\n        f\"Report URL: {report_url}\\n\\n\"\n        f\"Best regards,\\n\"\n        f\"Your Pipeline Service\"\n    )\n\n    message = create_email_message(gmail_sender, gmail_recipient, email_subject, email_body)\n\n    # Get credentials from our google_auth module\n    creds: Credentials = get_google_oauth_credentials()\n\n    # Build the Gmail service\n    service = build(\"gmail\", \"v1\", credentials=creds)\n\n    # Send the message using the Gmail API\n    sent_message = service.users().messages().send(userId=\"me\", body=message).execute()\n    return {\"status\": \"success\", \"message\": f\"Email sent successfully, id: {sent_message.get('id')}\"}\n"
+        }
+      ],
+      "update_status": "up_to_date",
       "is_deployed": false
     },
     {
@@ -170,12 +217,12 @@
         "name": "pipeline_endpoint",
         "namespace": "app.pipeline",
         "dependencies": [
-          "app.pipeline.salesforce_query",
-          "app.pipeline.filter_unprocessed",
           "app.pipeline.google_ads_upload",
-          "app.pipeline.store_success",
+          "app.pipeline.gmail_notification",
           "app.pipeline.google_sheets_report",
-          "app.pipeline.gmail_notification"
+          "app.pipeline.store_success",
+          "app.pipeline.salesforce_query",
+          "app.pipeline.filter_unprocessed"
         ],
         "purpose": "Defines a FastAPI endpoint that calls all the pipeline modules sequentially. When this endpoint is accessed, it performs the following steps in order: (1) Calls salesforce_query to fetch data from Salesforce. (2) Calls filter_unprocessed to filter out already processed rows. (3) Calls google_ads_upload to upload conversions to Google Ads. (4) Calls store_success to log successful uploads in the database. (5) Calls google_sheets_report to generate a Google Sheets document containing both successful and failed uploads. (6) Calls gmail_notification to send an email via Gmail with the report link. Each step validates its output before proceeding to the next step and aggregates the results to return a comprehensive JSON report summarizing the pipeline execution.",
         "pypi_packages": [
@@ -183,8 +230,13 @@
         ],
         "is_endpoint": true
       },
-      "files": [],
-      "update_status": "to_update",
+      "files": [
+        {
+          "path": "app/pipeline/pipeline_endpoint.py",
+          "content": "from fastapi import APIRouter\nfrom typing import Any, Dict, List, Tuple\n\nfrom app.pipeline import salesforce_query\nfrom app.pipeline import filter_unprocessed\nfrom app.pipeline import google_ads_upload\nfrom app.pipeline import store_success\nfrom app.pipeline import google_sheets_report\nfrom app.pipeline import gmail_notification\n\nrouter = APIRouter()\n\n\ndef partition_upload_results(\n    filtered_data: List[Dict[str, Any]], \n    upload_results: List[Dict[str, Any]]\n) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:\n    \"\"\"\n    Partitions the upload results into success and failure lists.\n    For successful uploads, merge additional fields from the original Salesforce record.\n    \n    Assumes:\n      - Each record in filtered_data has keys: \"Id\", \"GCLID__c\",\n        \"Original_Lead_Created_Date_Time__c\", \"Admission_Date__c\".\n      - Each record in upload_results has key \"salesforce_id\" and \"status\" and \"error\".\n    \"\"\"\n    success_data: List[Dict[str, Any]] = []\n    failed_data: List[Dict[str, Any]] = []\n    \n    # Create a lookup dict for original records by Salesforce Id\n    record_lookup = {record[\"Id\"]: record for record in filtered_data}\n    \n    for result in upload_results:\n        sf_id = result.get(\"salesforce_id\")\n        if result.get(\"status\") == \"success\":\n            # Find original record details\n            orig = record_lookup.get(sf_id, {})\n            success_data.append({\n                \"salesforce_id\": sf_id,\n                \"gclid\": orig.get(\"GCLID__c\"),\n                \"original_lead_created_datetime\": orig.get(\"Original_Lead_Created_Date_Time__c\"),\n                \"admission_date\": orig.get(\"Admission_Date__c\"),\n                \"status\": \"successful\",\n                \"error_details\": None\n            })\n        else:\n            failed_data.append({\n                \"salesforce_id\": sf_id if sf_id is not None else \"\",\n                \"error\": result.get(\"error\", \"Unknown error\")\n            })\n    return success_data, failed_data\n\n\n@router.get(\"/pipeline\", response_model=Dict[str, Any])\ndef run_pipeline() -> Dict[str, Any]:\n    \"\"\"\n    FastAPI endpoint that executes the entire pipeline sequentially:\n      1. Calls salesforce_query to fetch data.\n      2. Filters out processed records using filter_unprocessed.\n      3. Uploads conversions to Google Ads via google_ads_upload.\n      4. Stores successful uploads into the database via store_success.\n      5. Creates a Google Sheets report with google_sheets_report.\n      6. Sends an email notification with the report link via gmail_notification.\n      \n    Returns:\n      A JSON dictionary summarizing pipeline execution.\n    \"\"\"\n    # Step 1: Query Salesforce\n    sales_data: List[Dict[str, Any]] = salesforce_query.query_salesforce()\n    \n    # Step 2: Filter already processed records\n    filtered_data: List[Dict[str, Any]] = filter_unprocessed.filter_unprocessed(sales_data)\n    \n    # Step 3: Upload conversions to Google Ads\n    upload_results: List[Dict[str, Any]] = google_ads_upload.upload_conversions(filtered_data)\n    \n    # Partition the upload results into successes and failures, merging record details for successes\n    success_data, failed_data = partition_upload_results(filtered_data, upload_results)\n    \n    # Step 4: Store successful uploads in the database\n    stored_records = store_success.store_success_records(success_data)\n    \n    # Step 5: Generate a Google Sheets report\n    sheet_report = google_sheets_report.generate_google_sheets_report(success_data, failed_data)\n    \n    # Ensure report_url is a string\n    report_url: str = sheet_report.get(\"spreadsheet_url\", \"\")\n    \n    # Step 6: Send email notification with report link\n    email_report = gmail_notification.send_email_report(\n        success_count=len(success_data), \n        failed_count=len(failed_data), \n        report_url=report_url\n    )\n    \n    # Aggregate results for the JSON report\n    pipeline_report = {\n        \"salesforce_records\": len(sales_data),\n        \"filtered_records\": len(filtered_data),\n        \"upload_successes\": len(success_data),\n        \"upload_failures\": len(failed_data),\n        \"stored_records\": len(stored_records),\n        \"report\": sheet_report,\n        \"email_report\": email_report\n    }\n    \n    return pipeline_report\n"
+        }
+      ],
+      "update_status": "up_to_date",
       "is_deployed": false
     },
     {
@@ -192,7 +244,9 @@
         "type": "datamodel",
         "name": "UploadStatus",
         "namespace": "app.models",
-        "dependencies": [],
+        "dependencies": [
+          "app.core.database.sql_adaptor"
+        ],
         "fields": [
           {
             "name": "id",
@@ -228,8 +282,17 @@
           }
         ]
       },
-      "files": [],
-      "update_status": "to_update",
+      "files": [
+        {
+          "path": "app/models/upload_status.py",
+          "content": "from sqlalchemy import Column, Integer, String, DateTime, Text\nfrom app.core.database.sql_adaptor import Base\nimport datetime\n\nclass UploadStatus(Base):\n    __tablename__ = \"upload_status\"\n\n    id = Column(Integer, primary_key=True, index=True)\n    salesforce_id = Column(String, nullable=False, comment=\"Primary key for the upload record entry: Salesforce Opportunity Id from the query result.\")\n    gclid = Column(String, nullable=True, comment=\"The GCLID value (GCLID__c) from the Salesforce record, used for conversion tracking.\")\n    original_lead_created_datetime = Column(DateTime, nullable=False, comment=\"The Original_Lead_Created_Date_Time__c field from the Salesforce record capturing when the lead was created.\")\n    admission_date = Column(DateTime, nullable=False, comment=\"The Admission_Date__c field from the Salesforce record indicating the date of admission.\")\n    status = Column(String, nullable=False, comment=\"Upload status indicator, e.g., 'successful' or 'failed'.\")\n    timestamp = Column(DateTime, default=datetime.datetime.utcnow, nullable=False, comment=\"The date and time when this upload status was recorded.\")\n    error_details = Column(Text, nullable=True, comment=\"Contains error details if the upload failed, otherwise null.\")\n    \n    def __repr__(self):\n        return (f\"<UploadStatus(id={self.id}, salesforce_id='{self.salesforce_id}', \"\n                f\"gclid='{self.gclid}', original_lead_created_datetime='{self.original_lead_created_datetime}', \"\n                f\"admission_date='{self.admission_date}', status='{self.status}', \"\n                f\"timestamp='{self.timestamp}', error_details='{self.error_details}')>\")\n"
+        },
+        {
+          "path": "app/models/upload_status_schema.py",
+          "content": "from datetime import datetime\nfrom typing import Optional\nfrom pydantic import BaseModel\n\nclass UploadStatusBase(BaseModel):\n    salesforce_id: str\n    gclid: Optional[str] = None\n    original_lead_created_datetime: datetime\n    admission_date: datetime\n    status: str\n    error_details: Optional[str] = None\n\nclass UploadStatusCreate(UploadStatusBase):\n    pass\n\nclass UploadStatusRead(UploadStatusBase):\n    id: int\n    timestamp: datetime\n\n    class Config:\n        orm_mode = True\n"
+        }
+      ],
+      "update_status": "up_to_date",
       "is_deployed": false
     },
     {
@@ -244,8 +307,13 @@
         ],
         "is_endpoint": false
       },
-      "files": [],
-      "update_status": "to_update",
+      "files": [
+        {
+          "path": "app/core/google_auth/google_auth.py",
+          "content": "import os\nfrom typing import Dict\nfrom google.oauth2.credentials import Credentials\nfrom google.auth.transport.requests import Request\n\n# OAuth token endpoint for Google\nGOOGLE_TOKEN_URI = \"https://oauth2.googleapis.com/token\"\n\ndef get_google_oauth_credentials() -> Credentials:\n    \"\"\"\n    Obtains Google OAuth credentials by using environment variables:\n      - OAUTH_CLIENT_ID\n      - OAUTH_CLIENT_SECRET\n      - OAUTH_REFRESH_TOKEN\n\n    Creates a Credentials object with no initial access token and refreshes it immediately,\n    returning valid credentials with an access token.\n    \n    Returns:\n        A google.oauth2.credentials.Credentials instance with a valid access token.\n    \n    Raises:\n        EnvironmentError: If one or more required environment variables are not set.\n        google.auth.exceptions.RefreshError: If the token refresh operation fails.\n    \"\"\"\n    client_id = os.getenv(\"OAUTH_CLIENT_ID\")\n    client_secret = os.getenv(\"OAUTH_CLIENT_SECRET\")\n    refresh_token = os.getenv(\"OAUTH_REFRESH_TOKEN\")\n\n    if not (client_id and client_secret and refresh_token):\n        raise EnvironmentError(\"One or more required environment variables (OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REFRESH_TOKEN) are not set.\")\n\n    # Construct a credentials object without an access token\n    creds = Credentials(\n        token=None,\n        refresh_token=refresh_token,\n        token_uri=GOOGLE_TOKEN_URI,\n        client_id=client_id,\n        client_secret=client_secret\n    )\n    \n    # Refresh the access token using a Request\n    creds.refresh(Request())\n    return creds\n\ndef get_access_token() -> str:\n    \"\"\"\n    Obtains a valid Google OAuth access token.\n    \n    Returns:\n        The access token as a string.\n    \n    Raises:\n        EnvironmentError: If required environment variables are missing.\n        google.auth.exceptions.RefreshError: If token refresh fails.\n    \"\"\"\n    creds = get_google_oauth_credentials()\n    return creds.token\n\ndef get_google_auth_headers() -> Dict[str, str]:\n    \"\"\"\n    Returns HTTP headers for authenticating against Google APIs.\n    The header contains the Bearer token.\n    \n    Returns:\n        A dictionary with the Authorization header.\n    \"\"\"\n    access_token = get_access_token()\n    return {\"Authorization\": f\"Bearer {access_token}\"}\n"
+        }
+      ],
+      "update_status": "up_to_date",
       "is_deployed": false
     }
   ],

@@ -1,0 +1,12 @@
+fastapi==0.115.6
+google-ads==22.0.0
+google-api-python-client==2.70.0
+google-auth==2.16.0
+gspread==5.10.0
+mypy==1.15.0
+psycopg2-binary==2.9.10
+pydantic==2.10.4
+python-dotenv==1.0.1
+simple-salesforce==1.12.4
+sqlalchemy==2.0.36
+uvicorn==0.34.0
