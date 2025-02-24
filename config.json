@@ -1,0 +1,39 @@
+{
+  "name": "jts2",
+  "user": "lgaleana",
+  "architecture": [
+    {
+      "design": {
+        "type": "infrastructure",
+        "name": "CloudRun",
+        "namespace": "External",
+        "config": {}
+      },
+      "files": [],
+      "update_status": "up_to_date",
+      "is_deployed": false
+    },
+    {
+      "design": {
+        "type": "logic",
+        "name": "main",
+        "namespace": "app",
+        "dependencies": [
+          "Models and endpoints"
+        ],
+        "purpose": "1) Calls load_dotenv() before anything else.\n2) Initializes the FastAPI app.\n3) Adds CORSMiddleware with *.\n4) Adds all the application routers.\n5) Calls Base.metadata.create_all(engine).",
+        "pypi_packages": [
+          "fastapi==0.115.6",
+          "pydantic==2.10.4",
+          "python-dotenv==1.0.1",
+          "uvicorn==0.34.0"
+        ],
+        "is_endpoint": false
+      },
+      "files": [],
+      "update_status": "to_update",
+      "is_deployed": false
+    }
+  ],
+  "github": "https://github.com/Modular-Asembly/lgaleana_jts2"
+}
