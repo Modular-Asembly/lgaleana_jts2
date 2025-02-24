@@ -102,7 +102,7 @@
         ],
         "purpose": "Uploads conversions to Google Ads using the Google Ads API. This module requires an access token provided by the google_auth module (app.core.google_auth.google_auth) to authenticate API calls. It takes the filtered records provided as input (from filter_unprocessed when called via an orchestration endpoint) and attempts conversion uploads. It returns the results of each upload attempt, including success and error details, and applies appropriate error handling and logging for failed uploads.\n\nUse:\nGADS_DEVELOPER_TOKEN\nGADS_LOGIN_CUSTOMER_ID\nGADS_CLIENT_ID\nGADS_CLIENT_SECRET\nGADS_CUSTOMER",
         "pypi_packages": [
-          "google-ads==13.0.0"
+          "google-ads==22.0.0"
         ],
         "is_endpoint": false
       },
